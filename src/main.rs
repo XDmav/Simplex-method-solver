@@ -55,9 +55,7 @@ impl Display for Cmp {
 
 #[derive(Clone, Copy)]
 struct Equation {
-	a: f64,
-	b: f64,
-	c: f64,
+	cof: [f64; 3],
 	cmp: Cmp,
 }
 
@@ -77,8 +75,7 @@ impl Display for Limit {
 }
 
 struct FinalEquation {
-	a: f64,
-	b: f64,
+	cof: [f64; 2],
 	limit: Limit
 }
 
@@ -90,8 +87,8 @@ struct MyApp {
 impl Default for MyApp {
 	fn default() -> Self {
 		Self {
-			final_equation: FinalEquation { a: 1.0, b: 1.0, limit: Limit::Min },
-			equations: [Equation { a: 1.0, b: 1.0, c: 1.0, cmp: Cmp::Gte }; 3]
+			final_equation: FinalEquation { cof: [-2.0, 1.0], limit: Limit::Min },
+			equations: [Equation { cof: [1.0, 1.0, 1.0], cmp: Cmp::Gte }; 3]
 		}
 	}
 }
@@ -118,12 +115,31 @@ fn change_basis(simple_tab: &mut [[f64; 6]; 3], basis: &mut [usize; 3], i: usize
 	}
 }
 
+impl MyApp {
+	fn is_optimal(&self, delta: &[f64; 6]) -> bool {
+		match self.final_equation.limit {
+			Limit::Max => {
+				if delta.iter().all(|&x| x >= 0.0) {
+					return true
+				}
+			}
+			Limit::Min => {
+				if delta.iter().all(|&x| x <= 0.0) {
+					return true
+				}
+			}
+		}
+		
+		false
+	}
+}
+
 impl eframe::App for MyApp {
 	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
 		CentralPanel::default().show(ctx, |ui| {
 			ui.horizontal(|ui| {
-				add_drag_value(ui, &mut self.final_equation.a, "z = ");
-				add_drag_value(ui, &mut self.final_equation.b, "x1 + ");
+				add_drag_value(ui, &mut self.final_equation.cof[0], "z = ");
+				add_drag_value(ui, &mut self.final_equation.cof[1], "x1 + ");
 				ui.label("x2 -> ");
 				ComboBox::from_id_salt(3)
 					.selected_text(self.final_equation.limit.to_string())
@@ -135,8 +151,8 @@ impl eframe::App for MyApp {
 			});
 			for i in 0..3 {
 				ui.horizontal(|ui| {
-					add_drag_value(ui, &mut self.equations[i].a, "");
-					add_drag_value(ui, &mut self.equations[i].b, "x1 + ");
+					add_drag_value(ui, &mut self.equations[i].cof[0], "");
+					add_drag_value(ui, &mut self.equations[i].cof[1], "x1 + ");
 					ui.label("x2 ");
 					ComboBox::from_id_salt(i)
 						.selected_text(self.equations[i].cmp.to_string())
@@ -145,7 +161,7 @@ impl eframe::App for MyApp {
 							ui.selectable_value(&mut self.equations[i].cmp, Cmp::Gte, ">=");
 							ui.selectable_value(&mut self.equations[i].cmp, Cmp::Lte, "<=");
 						});
-					add_drag_value(ui, &mut self.equations[i].c, "");
+					add_drag_value(ui, &mut self.equations[i].cof[2], "");
 				});
 			}
 			
@@ -153,13 +169,13 @@ impl eframe::App for MyApp {
 			
 			for (i, tab) in simple_tab.iter_mut().enumerate() {
 				if self.equations[i].cmp == Cmp::Gte {
-					tab[0] = self.equations[i].a * -1.0;
-					tab[1] = self.equations[i].b * -1.0;
-					tab[5] = self.equations[i].c * -1.0;
+					tab[0] = self.equations[i].cof[0] * -1.0;
+					tab[1] = self.equations[i].cof[1] * -1.0;
+					tab[5] = self.equations[i].cof[2] * -1.0;
 				} else {
-					tab[0] = self.equations[i].a;
-					tab[1] = self.equations[i].b;
-					tab[5] = self.equations[i].c;
+					tab[0] = self.equations[i].cof[0];
+					tab[1] = self.equations[i].cof[1];
+					tab[5] = self.equations[i].cof[2];
 				}
 			}
 			
@@ -182,59 +198,55 @@ impl eframe::App for MyApp {
 					}
 				}
 				
-				if let Some(i) = min_i {
-					let mut min = 0.0;
-					let mut min_j = None;
-					for j in 0..5 {
-						if simple_tab[i][j] < min {
-							min = simple_tab[i][j];
-							min_j = Some(j);
+				match min_i {
+					None => break,
+					Some(i) => {
+						let mut min = 0.0;
+						let mut min_j = None;
+						for j in 0..5 {
+							if simple_tab[i][j] < min {
+								min = simple_tab[i][j];
+								min_j = Some(j);
+							}
+						}
+						
+						match min_j {
+							None => {
+								can = false;
+								break;
+							}
+							Some(j) => change_basis(&mut simple_tab, &mut basis, i, j)
 						}
 					}
-					
-					if let Some(j) = min_j {
-						change_basis(&mut simple_tab, &mut basis, i, j);
-					} else {
-						can = false;
-						break;
-					}
-				} else {
-					break;
 				}
 			}
 			
 			let mut result = None;
 			
 			if can {
-				can = false;
 				for _ in 0..20 {
 					let mut delta = [0.0; 6];
 					
 					for (i, item_i) in simple_tab.iter().enumerate() {
 						for (j, item_j) in delta.iter_mut().enumerate() {
-							if basis[i] == 0 {
-								*item_j += item_i[j] * self.final_equation.a;
-							} else if basis[i] == 1 {
-								*item_j += item_i[j] * self.final_equation.b;
+							if (0..=1).contains(&basis[i]) {
+								*item_j += item_i[j] * self.final_equation.cof[basis[i]];
 							}
 						}
 					}
-					delta[0] -= self.final_equation.a;
-					delta[1] -= self.final_equation.b;
 					
-					match self.final_equation.limit {
-						Limit::Max => {
-							if delta.iter().all(|&x| x >= 0.0) {
-								can = true;
-								break;
-							}
+					for (i, item) in delta.iter_mut().enumerate().take(2) {
+						*item -= self.final_equation.cof[i];
+					}
+					
+					if self.is_optimal(&delta) {
+						let mut x = [0.0; 5];
+						for (i, item) in simple_tab.iter().enumerate() {
+							x[basis[i]] = item[5];
 						}
-						Limit::Min => {
-							if delta.iter().all(|&x| x <= 0.0) {
-								can = true;
-								break;
-							}
-						}
+						
+						result = Some([x[0], x[1]]);
+						break;
 					}
 					
 					let mut max_min = 0.0;
@@ -265,20 +277,10 @@ impl eframe::App for MyApp {
 						}
 					}
 					
-					if let Some(i) = min_i {
-						change_basis(&mut simple_tab, &mut basis, i, max_min_j);
-					} else {
-						break;
+					match min_i {
+						None => break,
+						Some(i) => change_basis(&mut simple_tab, &mut basis, i, max_min_j)
 					}
-				}
-				
-				if can {
-					let mut x = [0.0; 5];
-					for (i, item) in simple_tab.iter().enumerate() {
-						x[basis[i]] = item[5];
-					}
-					
-					result = Some([x[0], x[1]]);
 				}
 			}
 			
@@ -289,9 +291,9 @@ impl eframe::App for MyApp {
 				.show(ui, |plot| {
 					for i in 0..3 {
 						let x1 = 100.0;
-						let x2 = (self.equations[i].c - self.equations[i].a * x1) / self.equations[i].b;
+						let x2 = (self.equations[i].cof[2] - self.equations[i].cof[0] * x1) / self.equations[i].cof[1];
 						let x1_2 = -100.0;
-						let x2_2 = (self.equations[i].c - self.equations[i].a * x1_2) / self.equations[i].b;
+						let x2_2 = (self.equations[i].cof[2] - self.equations[i].cof[0] * x1_2) / self.equations[i].cof[1];
 						plot.add(Line::new(Vec::from([[x1, x2], [x1_2, x2_2]]))
 							.color(Color32::BLUE)
 							.width(2.0)
@@ -303,14 +305,14 @@ impl eframe::App for MyApp {
 							vec1[1] *= -1.0;
 						}
 						plot.add(Polygon::new(Vec::from([[x1, x2], [x1_2, x2_2], [x1_2 + vec1[0], x2_2 + vec1[1]], [x1 + vec1[0], x2 + vec1[1]]]))
-							.fill_color(Color32::from_rgba_premultiplied(20, 0, 0, 10)))
+							.fill_color(Color32::from_rgba_premultiplied(20, 0, 0, 30)))
 					}
 					
 					if let Some(result) = result {
 						plot.add(Points::new([result[0], result[1]]).color(Color32::RED).radius(5.0));
 						
-						let x2_1 = (result[0] - 100.0) * -self.final_equation.a / self.final_equation.b;
-						let x2_2 = (result[0] + 100.0) * -self.final_equation.a / self.final_equation.b;
+						let x2_1 = (result[0] - 100.0) * -self.final_equation.cof[0] / self.final_equation.cof[1];
+						let x2_2 = (result[0] + 100.0) * -self.final_equation.cof[0] / self.final_equation.cof[1];
 						plot.add(Line::new(Vec::from([
 							[2.0 * result[0] - 100.0, x2_1 + result[1]],
 							[2.0 * result[0] + 100.0, x2_2 + result[1]]
