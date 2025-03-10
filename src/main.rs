@@ -2,8 +2,9 @@
 
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use eframe::egui::{CentralPanel, Color32, ComboBox, DragValue, FontFamily, FontId, TextStyle, Ui, ViewportBuilder, Visuals};
+use eframe::egui::{CentralPanel, Color32, ComboBox, DragValue, FontFamily, FontId, ScrollArea, TextStyle, Ui, ViewportBuilder, Visuals};
 use eframe::{egui, NativeOptions};
+use egui_extras::{Column, TableBuilder};
 use egui_plot::{Line, Plot, Points, Polygon};
 
 fn main() -> eframe::Result {
@@ -84,7 +85,8 @@ struct FinalEquation {
 struct MyApp {
 	final_equation: FinalEquation,
 	equations: [Equation; 3],
-	result: Option<[f64; 2]>
+	result: Option<[f64; 2]>,
+	simple_tab_history: Vec<[[f64; 6]; 3]>,
 }
 
 impl Default for MyApp {
@@ -93,6 +95,7 @@ impl Default for MyApp {
 			final_equation: FinalEquation { cof: [-2.0, 1.0], limit: Limit::Min },
 			equations: [Equation { cof: [1.0, 1.0, 1.0], cmp: Cmp::Gte }; 3],
 			result: None,
+			simple_tab_history: Vec::new(),
 		}
 	}
 }
@@ -104,24 +107,26 @@ fn add_drag_value(ui: &mut Ui, value: &mut f64, label: &str, changed: &mut bool)
 	};
 }
 
-fn change_basis(simple_tab: &mut [[f64; 6]; 3], basis: &mut [usize; 3], i: usize, j: usize) {
-	basis[i] = j;
-	let del = simple_tab[i][j];
-	for item in simple_tab[i].iter_mut() {
-		*item /= del;
-	}
-	
-	for p in 0..3 {
-		if p != i {
-			let multi = simple_tab[p][j];
-			for q in 0..6 {
-				simple_tab[p][q] -= multi * simple_tab[i][q];
+impl MyApp {
+	fn change_basis(&mut self, simple_tab: &mut [[f64; 6]; 3], basis: &mut [usize; 3], i: usize, j: usize) {
+		basis[i] = j;
+		let del = simple_tab[i][j];
+		for item in simple_tab[i].iter_mut() {
+			*item /= del;
+		}
+		
+		for p in 0..3 {
+			if p != i {
+				let multi = simple_tab[p][j];
+				for q in 0..6 {
+					simple_tab[p][q] -= multi * simple_tab[i][q];
+				}
 			}
 		}
+		
+		self.simple_tab_history.push(*simple_tab);
 	}
-}
-
-impl MyApp {
+	
 	fn is_optimal(&self, delta: &[f64; 6]) -> bool {
 		match self.final_equation.limit {
 			Limit::Max => {
@@ -158,6 +163,8 @@ impl MyApp {
 		simple_tab[1][3] = 1.0;
 		simple_tab[2][4] = 1.0;
 		
+		self.simple_tab_history = vec![simple_tab];
+		
 		let mut basis = [2, 3, 4];
 		
 		let mut can = true;
@@ -190,7 +197,7 @@ impl MyApp {
 							can = false;
 							break;
 						}
-						Some(j) => change_basis(&mut simple_tab, &mut basis, i, j)
+						Some(j) => self.change_basis(&mut simple_tab, &mut basis, i, j)
 					}
 				}
 			}
@@ -254,7 +261,7 @@ impl MyApp {
 				
 				match min_i {
 					None => break,
-					Some(i) => change_basis(&mut simple_tab, &mut basis, i, max_min_j)
+					Some(i) => self.change_basis(&mut simple_tab, &mut basis, i, max_min_j)
 				}
 			}
 		}
@@ -306,6 +313,37 @@ impl eframe::App for MyApp {
 				self.update_simple_tab()
 			}
 			
+			ScrollArea::vertical()
+				.max_height(160.0)
+				.show(ui, |ui| {
+					for (i, simple_tab) in self.simple_tab_history.iter().enumerate() {
+						TableBuilder::new(ui)
+							.id_salt(i + 4)
+							.vscroll(false)
+							.striped(true)
+							.columns(Column::auto().at_least(50.0), 6)
+							.header(20.0, |mut header| {
+								for label in ["x1", "x2", "x3", "x4", "x5", "b"] {
+									header.col(|ui| {
+										ui.heading(label);
+									});
+								}
+							})
+							.body(|mut body| {
+								for items_row in simple_tab {
+									body.row(20.0, |mut row| {
+										for item in items_row {
+											row.col(|ui| {
+												ui.label(format!("{:.2}", item));
+											});
+										}
+									})
+								}
+							});
+						ui.add_space(10.0);
+					}
+				});
+				
 			Plot::new("plot")
 				.auto_bounds(false)
 				.x_axis_label("x1")
