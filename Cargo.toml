@@ -6,5 +6,4 @@ edition = "2024"
 [dependencies]
 env_logger = "0"
 eframe = "0"
-egui_extras = { version = "0", features = ["image"]}
 egui_plot = "0"

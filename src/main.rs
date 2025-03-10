@@ -20,7 +20,6 @@ fn main() -> eframe::Result {
 		"Lab4",
 		options,
 		Box::new(|cc| {
-			egui_extras::install_image_loaders(&cc.egui_ctx);
 			if cc.egui_ctx.style().visuals.dark_mode {
 				cc.egui_ctx.set_visuals(Visuals {
 					override_text_color: Some(Color32::from_rgb(255, 255, 255)),
@@ -33,7 +32,10 @@ fn main() -> eframe::Result {
 				FontId::new(16.0, FontFamily::Proportional),
 			);
 			cc.egui_ctx.set_style(style);
-			Ok(Box::<MyApp>::default())
+			
+			let mut result = Box::<MyApp>::default();
+			result.update_simple_tab();
+			Ok(result)
 		}),
 	)
 }
@@ -82,20 +84,24 @@ struct FinalEquation {
 struct MyApp {
 	final_equation: FinalEquation,
 	equations: [Equation; 3],
+	result: Option<[f64; 2]>
 }
 
 impl Default for MyApp {
 	fn default() -> Self {
 		Self {
 			final_equation: FinalEquation { cof: [-2.0, 1.0], limit: Limit::Min },
-			equations: [Equation { cof: [1.0, 1.0, 1.0], cmp: Cmp::Gte }; 3]
+			equations: [Equation { cof: [1.0, 1.0, 1.0], cmp: Cmp::Gte }; 3],
+			result: None,
 		}
 	}
 }
 
-fn add_drag_value(ui: &mut Ui, value: &mut f64, label: &str,) {
+fn add_drag_value(ui: &mut Ui, value: &mut f64, label: &str, changed: &mut bool) {
 	let label = ui.label(label);
-	ui.add_sized([60.0, 15.0], DragValue::new(value).speed(0.1)).labelled_by(label.id);
+	if ui.add_sized([60.0, 15.0], DragValue::new(value).speed(0.1)).labelled_by(label.id).changed() {
+		*changed = true
+	};
 }
 
 fn change_basis(simple_tab: &mut [[f64; 6]; 3], basis: &mut [usize; 3], i: usize, j: usize) {
@@ -132,156 +138,172 @@ impl MyApp {
 		
 		false
 	}
-}
-
-impl eframe::App for MyApp {
-	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-		CentralPanel::default().show(ctx, |ui| {
-			ui.horizontal(|ui| {
-				add_drag_value(ui, &mut self.final_equation.cof[0], "z = ");
-				add_drag_value(ui, &mut self.final_equation.cof[1], "x1 + ");
-				ui.label("x2 -> ");
-				ComboBox::from_id_salt(3)
-					.selected_text(self.final_equation.limit.to_string())
-					.width(20.0)
-					.show_ui(ui, |ui| {
-						ui.selectable_value(&mut self.final_equation.limit, Limit::Max, "Max");
-						ui.selectable_value(&mut self.final_equation.limit, Limit::Min, "Min");
-					});
-			});
-			for i in 0..3 {
-				ui.horizontal(|ui| {
-					add_drag_value(ui, &mut self.equations[i].cof[0], "");
-					add_drag_value(ui, &mut self.equations[i].cof[1], "x1 + ");
-					ui.label("x2 ");
-					ComboBox::from_id_salt(i)
-						.selected_text(self.equations[i].cmp.to_string())
-						.width(15.0)
-						.show_ui(ui, |ui| {
-							ui.selectable_value(&mut self.equations[i].cmp, Cmp::Gte, ">=");
-							ui.selectable_value(&mut self.equations[i].cmp, Cmp::Lte, "<=");
-						});
-					add_drag_value(ui, &mut self.equations[i].cof[2], "");
-				});
+	
+	fn update_simple_tab(&mut self) {
+		let mut simple_tab = [[0.0; 6]; 3];
+		
+		for (i, tab) in simple_tab.iter_mut().enumerate() {
+			if self.equations[i].cmp == Cmp::Gte {
+				tab[0] = self.equations[i].cof[0] * -1.0;
+				tab[1] = self.equations[i].cof[1] * -1.0;
+				tab[5] = self.equations[i].cof[2] * -1.0;
+			} else {
+				tab[0] = self.equations[i].cof[0];
+				tab[1] = self.equations[i].cof[1];
+				tab[5] = self.equations[i].cof[2];
 			}
+		}
+		
+		simple_tab[0][2] = 1.0;
+		simple_tab[1][3] = 1.0;
+		simple_tab[2][4] = 1.0;
+		
+		let mut basis = [2, 3, 4];
+		
+		let mut can = true;
+		
+		loop {
+			let mut min = 0.0;
+			let mut min_i = None;
 			
-			let mut simple_tab = [[0.0; 6]; 3];
-			
-			for (i, tab) in simple_tab.iter_mut().enumerate() {
-				if self.equations[i].cmp == Cmp::Gte {
-					tab[0] = self.equations[i].cof[0] * -1.0;
-					tab[1] = self.equations[i].cof[1] * -1.0;
-					tab[5] = self.equations[i].cof[2] * -1.0;
-				} else {
-					tab[0] = self.equations[i].cof[0];
-					tab[1] = self.equations[i].cof[1];
-					tab[5] = self.equations[i].cof[2];
+			for (i, tab) in simple_tab.iter().enumerate() {
+				if tab[5] < min {
+					min = tab[5];
+					min_i = Some(i);
 				}
 			}
 			
-			simple_tab[0][2] = 1.0;
-			simple_tab[1][3] = 1.0;
-			simple_tab[2][4] = 1.0;
-			
-			let mut basis = [2, 3, 4];
-			
-			let mut can = true;
-			
-			loop {
-				let mut min = 0.0;
-				let mut min_i = None;
+			match min_i {
+				None => break,
+				Some(i) => {
+					let mut min = 0.0;
+					let mut min_j = None;
+					for j in 0..5 {
+						if simple_tab[i][j] < min {
+							min = simple_tab[i][j];
+							min_j = Some(j);
+						}
+					}
+					
+					match min_j {
+						None => {
+							can = false;
+							break;
+						}
+						Some(j) => change_basis(&mut simple_tab, &mut basis, i, j)
+					}
+				}
+			}
+		}
+		
+		self.result = None;
+		
+		if can {
+			for _ in 0..20 {
+				let mut delta = [0.0; 6];
 				
-				for (i, tab) in simple_tab.iter().enumerate() {
-					if tab[5] < min {
-						min = tab[5];
+				for (i, item_i) in simple_tab.iter().enumerate() {
+					for (j, item_j) in delta.iter_mut().enumerate() {
+						if (0..=1).contains(&basis[i]) {
+							*item_j += item_i[j] * self.final_equation.cof[basis[i]];
+						}
+					}
+				}
+				
+				for (i, item) in delta.iter_mut().enumerate().take(2) {
+					*item -= self.final_equation.cof[i];
+				}
+				
+				if self.is_optimal(&delta) {
+					let mut x = [0.0; 5];
+					for (i, item) in simple_tab.iter().enumerate() {
+						x[basis[i]] = item[5];
+					}
+					
+					self.result = Some([x[0], x[1]]);
+					break;
+				}
+				
+				let mut max_min = 0.0;
+				let mut max_min_j = 0;
+				for (j, item) in delta.iter().enumerate().take(5) {
+					match self.final_equation.limit {
+						Limit::Max => {
+							if *item < max_min {
+								max_min = *item;
+								max_min_j = j;
+							}
+						}
+						Limit::Min => {
+							if *item > max_min {
+								max_min = *item;
+								max_min_j = j;
+							}
+						}
+					}
+				}
+				
+				let mut min = f64::INFINITY;
+				let mut min_i = None;
+				for (i, item) in simple_tab.iter().enumerate() {
+					if item[max_min_j] > 0.0 && item[5] / item[max_min_j] < min {
+						min = item[5] / item[max_min_j];
 						min_i = Some(i);
 					}
 				}
 				
 				match min_i {
 					None => break,
-					Some(i) => {
-						let mut min = 0.0;
-						let mut min_j = None;
-						for j in 0..5 {
-							if simple_tab[i][j] < min {
-								min = simple_tab[i][j];
-								min_j = Some(j);
-							}
-						}
-						
-						match min_j {
-							None => {
-								can = false;
-								break;
-							}
-							Some(j) => change_basis(&mut simple_tab, &mut basis, i, j)
-						}
-					}
+					Some(i) => change_basis(&mut simple_tab, &mut basis, i, max_min_j)
 				}
 			}
+		}
+	}
+}
+
+impl eframe::App for MyApp {
+	fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+		let mut changed = false;
+		
+		CentralPanel::default().show(ctx, |ui| {
+			ui.horizontal(|ui| {
+				add_drag_value(ui, &mut self.final_equation.cof[0], "z = ", &mut changed);
+				add_drag_value(ui, &mut self.final_equation.cof[1], "x1 + ", &mut changed);
+				ui.label("x2 -> ");
+				ComboBox::from_id_salt(3)
+					.selected_text(self.final_equation.limit.to_string())
+					.width(20.0)
+					.show_ui(ui, |ui| {
+						if ui.selectable_value(&mut self.final_equation.limit, Limit::Max, "Max").changed() {
+							changed = true
+						};
+						if ui.selectable_value(&mut self.final_equation.limit, Limit::Min, "Min").changed() {
+							changed = true
+						};
+					});
+			});
+			for i in 0..3 {
+				ui.horizontal(|ui| {
+					add_drag_value(ui, &mut self.equations[i].cof[0], "", &mut changed);
+					add_drag_value(ui, &mut self.equations[i].cof[1], "x1 + ", &mut changed);
+					ui.label("x2 ");
+					ComboBox::from_id_salt(i)
+						.selected_text(self.equations[i].cmp.to_string())
+						.width(15.0)
+						.show_ui(ui, |ui| {
+						if ui.selectable_value(&mut self.equations[i].cmp, Cmp::Gte, ">=").changed() {
+							changed = true
+						};
+						if ui.selectable_value(&mut self.equations[i].cmp, Cmp::Lte, "<=").changed() {
+							changed = true
+						};
+						});
+					add_drag_value(ui, &mut self.equations[i].cof[2], "", &mut changed);
+				});
+			}
 			
-			let mut result = None;
-			
-			if can {
-				for _ in 0..20 {
-					let mut delta = [0.0; 6];
-					
-					for (i, item_i) in simple_tab.iter().enumerate() {
-						for (j, item_j) in delta.iter_mut().enumerate() {
-							if (0..=1).contains(&basis[i]) {
-								*item_j += item_i[j] * self.final_equation.cof[basis[i]];
-							}
-						}
-					}
-					
-					for (i, item) in delta.iter_mut().enumerate().take(2) {
-						*item -= self.final_equation.cof[i];
-					}
-					
-					if self.is_optimal(&delta) {
-						let mut x = [0.0; 5];
-						for (i, item) in simple_tab.iter().enumerate() {
-							x[basis[i]] = item[5];
-						}
-						
-						result = Some([x[0], x[1]]);
-						break;
-					}
-					
-					let mut max_min = 0.0;
-					let mut max_min_j = 0;
-					for (j, item) in delta.iter().enumerate().take(5) {
-						match self.final_equation.limit {
-							Limit::Max => {
-								if *item < max_min {
-									max_min = *item;
-									max_min_j = j;
-								}
-							}
-							Limit::Min => {
-								if *item > max_min {
-									max_min = *item;
-									max_min_j = j;
-								}
-							}
-						}
-					}
-					
-					let mut min = f64::INFINITY;
-					let mut min_i = None;
-					for (i, item) in simple_tab.iter().enumerate() {
-						if item[max_min_j] > 0.0 && item[5] / item[max_min_j] < min {
-							min = item[5] / item[max_min_j];
-							min_i = Some(i);
-						}
-					}
-					
-					match min_i {
-						None => break,
-						Some(i) => change_basis(&mut simple_tab, &mut basis, i, max_min_j)
-					}
-				}
+			if changed {
+				self.update_simple_tab()
 			}
 			
 			Plot::new("plot")
@@ -308,7 +330,7 @@ impl eframe::App for MyApp {
 							.fill_color(Color32::from_rgba_premultiplied(20, 0, 0, 30)))
 					}
 					
-					if let Some(result) = result {
+					if let Some(result) = self.result {
 						plot.add(Points::new([result[0], result[1]]).color(Color32::RED).radius(5.0));
 						
 						let x2_1 = (result[0] - 100.0) * -self.final_equation.cof[0] / self.final_equation.cof[1];
