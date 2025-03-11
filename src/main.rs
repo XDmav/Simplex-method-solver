@@ -2,7 +2,7 @@
 
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use eframe::egui::{CentralPanel, Color32, ComboBox, DragValue, FontFamily, FontId, ScrollArea, TextStyle, Ui, ViewportBuilder, Visuals};
+use eframe::egui::{CentralPanel, Color32, ComboBox, DragValue, FontFamily, FontId, IconData, ScrollArea, TextStyle, Ui, ViewportBuilder, Visuals};
 use eframe::{egui, NativeOptions};
 use egui_extras::{Column, TableBuilder};
 use egui_plot::{Line, Plot, Points, Polygon};
@@ -12,6 +12,7 @@ fn main() -> eframe::Result {
 	
 	let options = NativeOptions {
 		viewport: ViewportBuilder::default()
+			.with_icon(IconData::default())
 			.with_inner_size([1600.0, 800.0])
 			.with_min_inner_size([1600.0, 800.0]),
 		..Default::default()
@@ -87,6 +88,8 @@ struct MyApp {
 	equations: [Equation; 3],
 	result: Option<[f64; 2]>,
 	simple_tab_history: Vec<[[f64; 6]; 3]>,
+	basis_history: Vec<[usize; 3]>,
+	delta_history: Vec<[f64; 6]>,
 }
 
 impl Default for MyApp {
@@ -96,6 +99,8 @@ impl Default for MyApp {
 			equations: [Equation { cof: [1.0, 1.0, 1.0], cmp: Cmp::Gte }; 3],
 			result: None,
 			simple_tab_history: Vec::new(),
+			basis_history: Vec::new(),
+			delta_history: Vec::new(),
 		}
 	}
 }
@@ -125,6 +130,7 @@ impl MyApp {
 		}
 		
 		self.simple_tab_history.push(*simple_tab);
+		self.basis_history.push(*basis);
 	}
 	
 	fn is_optimal(&self, delta: &[f64; 6]) -> bool {
@@ -167,6 +173,8 @@ impl MyApp {
 		
 		let mut basis = [2, 3, 4];
 		
+		self.basis_history = vec![basis];
+		
 		let mut can = true;
 		
 		loop {
@@ -206,6 +214,8 @@ impl MyApp {
 		self.result = None;
 		
 		if can {
+			self.delta_history = Vec::new();
+			
 			for _ in 0..20 {
 				let mut delta = [0.0; 6];
 				
@@ -220,6 +230,8 @@ impl MyApp {
 				for (i, item) in delta.iter_mut().enumerate().take(2) {
 					*item -= self.final_equation.cof[i];
 				}
+				
+				self.delta_history.push(delta);
 				
 				if self.is_optimal(&delta) {
 					let mut x = [0.0; 5];
@@ -318,20 +330,23 @@ impl eframe::App for MyApp {
 				.show(ui, |ui| {
 					for (i, simple_tab) in self.simple_tab_history.iter().enumerate() {
 						TableBuilder::new(ui)
-							.id_salt(i + 4)
+							.id_salt((i * 2) + 1001)
 							.vscroll(false)
 							.striped(true)
-							.columns(Column::auto().at_least(50.0), 6)
+							.columns(Column::auto().at_least(50.0), 7)
 							.header(20.0, |mut header| {
-								for label in ["x1", "x2", "x3", "x4", "x5", "b"] {
+								for label in ["", "x1", "x2", "x3", "x4", "x5", "b"] {
 									header.col(|ui| {
 										ui.heading(label);
 									});
 								}
 							})
 							.body(|mut body| {
-								for items_row in simple_tab {
+								for (j, items_row) in simple_tab.iter().enumerate() {
 									body.row(20.0, |mut row| {
+										row.col(|ui| {
+											ui.label("x".to_owned() + (self.basis_history[i][j] + 1).to_string().as_ref());
+										});
 										for item in items_row {
 											row.col(|ui| {
 												ui.label(format!("{:.2}", item));
@@ -340,6 +355,32 @@ impl eframe::App for MyApp {
 									})
 								}
 							});
+						if i >= self.simple_tab_history.len() - self.delta_history.len() {
+							ui.add_space(5.0);
+							
+							TableBuilder::new(ui)
+								.id_salt(i * 2 + 1000)
+								.vscroll(false)
+								.striped(true)
+								.columns(Column::auto().at_least(50.0), 7)
+								.header(20.0, |mut header| {
+									for label in ["", "d1", "d2", "d3", "d4", "d5", "db"] {
+										header.col(|ui| {
+											ui.heading(label);
+										});
+									}
+								})
+								.body(|mut body| {
+									body.row(20.0, |mut row| {
+										row.col(|_ui| {});
+										for item in self.delta_history[i - (self.simple_tab_history.len() - self.delta_history.len())] {
+											row.col(|ui| {
+												ui.label(format!("{:.2}", item));
+											});
+										}
+									})
+								});
+						}
 						ui.add_space(10.0);
 					}
 				});
@@ -365,7 +406,7 @@ impl eframe::App for MyApp {
 							vec1[1] *= -1.0;
 						}
 						plot.add(Polygon::new(Vec::from([[x1, x2], [x1_2, x2_2], [x1_2 + vec1[0], x2_2 + vec1[1]], [x1 + vec1[0], x2 + vec1[1]]]))
-							.fill_color(Color32::from_rgba_premultiplied(20, 0, 0, 30)))
+							.fill_color(Color32::from_rgba_premultiplied(20, 0, 0, 50)))
 					}
 					
 					if let Some(result) = self.result {
