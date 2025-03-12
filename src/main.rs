@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::cmp::Ordering;
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use eframe::egui::{CentralPanel, Color32, ComboBox, DragValue, FontFamily, FontId, IconData, ScrollArea, TextStyle, Ui, ViewportBuilder, Visuals};
@@ -90,6 +91,7 @@ struct MyApp {
 	simple_tab_history: Vec<[[f64; 6]; 3]>,
 	basis_history: Vec<[usize; 3]>,
 	delta_history: Vec<[f64; 6]>,
+	dots: Vec<[f64; 2]>,
 }
 
 impl Default for MyApp {
@@ -101,6 +103,7 @@ impl Default for MyApp {
 			simple_tab_history: Vec::new(),
 			basis_history: Vec::new(),
 			delta_history: Vec::new(),
+			dots: Vec::new(),
 		}
 	}
 }
@@ -150,7 +153,93 @@ impl MyApp {
 		false
 	}
 	
+	fn if_valid(&self, x: f64, y: f64) -> bool {
+		if x < -0.00001 || y < -0.00001 || x > 10000.00001 || y > 10000.00001 {
+			return false
+		}
+		
+		for equation in self.equations {
+			let value = x * equation.cof[0] + y * equation.cof[1];
+			
+			match equation.cmp {
+				Cmp::Gte => {
+					if value < equation.cof[2] {
+						return false
+					}
+				}
+				Cmp::Lte => {
+					if value > equation.cof[2] {
+						return false
+					}
+				}
+			}
+		}
+		
+		true
+	}
+	
+	fn find_intersection(&self, a1: f64, b1: f64, c1: f64, a2: f64, b2: f64, c2: f64) -> Option<[f64; 2]> {
+		let determinant = a1 * b2 - a2 * b1;
+		if determinant == 0.0 {
+			return None
+		}
+		
+		let x = (b2 * c1 - b1 * c2) / determinant;
+		let y = (a1 * c2 - a2 * c1) / determinant;
+		
+		if !self.if_valid(x, y) {
+			return None
+		}
+		
+		Some([x, y])
+	}
+	
 	fn update_simple_tab(&mut self) {
+		self.dots = Vec::new();
+		
+		for equation_1 in self.equations {
+			for equation_2 in self.equations {
+				let cord = self.find_intersection(equation_1.cof[0], equation_1.cof[1], equation_1.cof[2],
+				                                  equation_2.cof[0], equation_2.cof[1], equation_2.cof[2]);
+				if let Some(cord) = cord {
+					self.dots.push(cord);
+				}
+			}
+			
+			for equation_2 in [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 10000.0], [1.0, 0.0, 10000.0]] {
+				let cord = self.find_intersection(equation_1.cof[0], equation_1.cof[1], equation_1.cof[2],
+				                                  equation_2[0], equation_2[1], equation_2[2]);
+				if let Some(cord) = cord {
+					self.dots.push(cord);
+				}
+			}
+		}
+		
+		for cord in [[0.0, 0.0], [10000.0, 0.0], [10000.0, 10000.0], [0.0, 10000.0]] {
+			if self.if_valid(cord[0], cord[1]) {
+				self.dots.push(cord);
+			}
+		}
+		
+		let mut centroid_x = 0.0;
+		for dot in self.dots.iter() {
+			centroid_x += dot[0]
+		}
+		centroid_x /= self.dots.len() as f64;
+		
+		let mut centroid_y = 0.0;
+		for dot in self.dots.iter() {
+			centroid_y += dot[1]
+		}
+		centroid_y /= self.dots.len() as f64;
+		
+		self.dots.sort_by(|x1, x2| {
+			if (x1[1] - centroid_y).atan2(x1[0] - centroid_x) < (x2[1] - centroid_y).atan2(x2[0] - centroid_x) {
+				return Ordering::Less
+			}
+			Ordering::Greater
+		});
+		
 		let mut simple_tab = [[0.0; 6]; 3];
 		
 		for (i, tab) in simple_tab.iter_mut().enumerate() {
@@ -391,36 +480,30 @@ impl eframe::App for MyApp {
 				.y_axis_label("x2")
 				.show(ui, |plot| {
 					for i in 0..3 {
-						let x1 = 100.0;
+						let x1 = 1000.0;
 						let x2 = (self.equations[i].cof[2] - self.equations[i].cof[0] * x1) / self.equations[i].cof[1];
-						let x1_2 = -100.0;
+						let x1_2 = -1000.0;
 						let x2_2 = (self.equations[i].cof[2] - self.equations[i].cof[0] * x1_2) / self.equations[i].cof[1];
 						plot.add(Line::new(Vec::from([[x1, x2], [x1_2, x2_2]]))
 							.color(Color32::BLUE)
 							.width(2.0)
 						);
-						let vec1 = [x1 - x1_2, x2 - x2_2];
-						let mut vec1 = [-vec1[1], vec1[0]];
-						if self.equations[i].cmp == Cmp::Lte {
-							vec1[0] *= -1.0;
-							vec1[1] *= -1.0;
-						}
-						plot.add(Polygon::new(Vec::from([[x1, x2], [x1_2, x2_2], [x1_2 + vec1[0], x2_2 + vec1[1]], [x1 + vec1[0], x2 + vec1[1]]]))
-							.fill_color(Color32::from_rgba_premultiplied(20, 0, 0, 50)))
 					}
 					
 					if let Some(result) = self.result {
 						plot.add(Points::new([result[0], result[1]]).color(Color32::RED).radius(5.0));
 						
-						let x2_1 = (result[0] - 100.0) * -self.final_equation.cof[0] / self.final_equation.cof[1];
-						let x2_2 = (result[0] + 100.0) * -self.final_equation.cof[0] / self.final_equation.cof[1];
+						let x2_1 = (result[0] - 1000.0) * -self.final_equation.cof[0] / self.final_equation.cof[1];
+						let x2_2 = (result[0] + 1000.0) * -self.final_equation.cof[0] / self.final_equation.cof[1];
 						plot.add(Line::new(Vec::from([
-							[2.0 * result[0] - 100.0, x2_1 + result[1]],
-							[2.0 * result[0] + 100.0, x2_2 + result[1]]
+							[2.0 * result[0] - 1000.0, x2_1 + result[1]],
+							[2.0 * result[0] + 1000.0, x2_2 + result[1]]
 						]))
 							.color(Color32::GREEN)
 							.width(2.0));
 					}
+					
+					plot.add(Polygon::new(self.dots.clone()).fill_color(Color32::from_rgba_premultiplied(80, 80, 0, 100)))
 				})
 		});
 	}
